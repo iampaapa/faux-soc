@@ -1,3 +1,11 @@
+/*
+ * Module: rotating_square_top
+ * Description:
+ * This module drives a four-digit seven-segment display to show a rotating
+ * square pattern. The pattern can circulate clockwise or counter-clockwise,
+ * and the circulation can be enabled or paused. The design is parameterized
+ * to allow for different clock division ratios for simulation and synthesis.
+ */
 module rotating_square_top #(
     // Parameters for clock division. Default values are for a 100MHz clock.
     parameter SLOW_CLK_DIV    = 27'd50_000_000, // ~1Hz for pattern state changes
@@ -17,6 +25,10 @@ module rotating_square_top #(
     logic [2:0] current_state; // Represents 8 unique positions in the rotation
     logic [1:0] digit_select;  // Selects which of the 4 digits is active
 
+    // Internal registers for clock division
+    logic [26:0] slow_counter;
+    logic [16:0] refresh_counter;
+
     // ROM to store the two square patterns
     // Common anode displays require a '0' to light a segment.
     // Pattern encoding: {dp, g, f, e, d, c, b, a}
@@ -26,11 +38,12 @@ module rotating_square_top #(
     // Clock dividers to generate slow ticks for state changes and display refresh
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
+            slow_counter <= '0;
+            refresh_counter <= '0;
             slow_clk_tick <= 1'b0;
             refresh_clk_tick <= 1'b0;
         end else begin
             // Generate a single-cycle tick for the state machine
-            logic [26:0] slow_counter;
             if (slow_counter == SLOW_CLK_DIV - 1) begin
                 slow_counter <= '0;
                 slow_clk_tick <= 1'b1;
@@ -40,7 +53,6 @@ module rotating_square_top #(
             end
 
             // Generate a single-cycle tick for the display refresh
-            logic [16:0] refresh_counter;
             if (refresh_counter == REFRESH_DIV - 1) begin
                 refresh_counter <= '0;
                 refresh_clk_tick <= 1'b1;
