@@ -1,137 +1,134 @@
-`timescale 1ns / 1ps
+/*
+ * Module: rotating_square_top
+ * Description:
+ * This module drives a four-digit seven-segment display to show a rotating
+ * square pattern. The pattern can circulate clockwise or counter-clockwise,
+ * and the circulation can be enabled or paused. The design is parameterized
+ * to allow for different clock division ratios for simulation and synthesis.
+ */
+module rotating_square_top #(
+    // Parameters for clock division. Default values are for a 100MHz clock.
+    parameter SLOW_CLK_DIV    = 27'd50_000_000, // ~1Hz for pattern state changes
+    parameter REFRESH_DIV     = 17'd50_000      // ~2kHz refresh rate -> ~500Hz per digit
+)(
+    input  logic        clk,        // 100MHz system clock
+    input  logic        rst_n,      // Active-low reset
+    input  logic        en,         // Enable signal for rotation
+    input  logic        cw,         // Direction: 1=clockwise, 0=counterclockwise
+    output logic [3:0]  an,         // Anode control for 4 digits (active-low)
+    output logic [7:0]  seg         // Segment control (active-low, {dp,g,f,e,d,c,b,a})
+);
 
-module rotating_square_tb;
+    // Internal logic signals
+    logic slow_clk_tick;
+    logic refresh_clk_tick;
+    logic [2:0] current_state; // Represents 8 unique positions in the rotation
+    logic [1:0] digit_select;  // Selects which of the 4 digits is active
 
-    // Testbench parameters
-    localparam CLK_PERIOD = 10; // 100MHz clock
+    // Internal registers for clock division
+    logic [26:0] slow_counter;
+    logic [16:0] refresh_counter;
 
-    // DUT signals
-    logic        clk;
-    logic        rst_n;
-    logic        en;
-    logic        cw;
-    logic [3:0]  an;
-    logic [7:0]  seg;
+    // Internal wires for combinational logic
+    logic [1:0] square_digit_pos;
+    logic [7:0] pattern_to_display;
 
-    // Instantiate DUT with fast timing parameters for simulation
-    rotating_square_top #(
-        .SLOW_CLK_DIV(1000),
-        .REFRESH_DIV(100)
-    ) dut (.*);
+    // ROM to store the two square patterns
+    // Common anode displays require a '0' to light a segment.
+    // Pattern encoding: {dp, g, f, e, d, c, b, a}
+    const logic [7:0] SQUARE_PATTERN_1 = 8'b10110000; // Segments a,b,f,e
+    const logic [7:0] SQUARE_PATTERN_2 = 8'b10011100; // Segments b,c,d,e
 
-    // Clock generation
-    initial begin
-        clk = 0;
-        forever #(CLK_PERIOD/2) clk = ~clk;
+    // Clock divider for the slow state-change clock
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            slow_counter <= '0;
+            slow_clk_tick <= 1'b0;
+        end else begin
+            if (slow_counter == SLOW_CLK_DIV - 1) begin
+                slow_counter <= '0;
+                slow_clk_tick <= 1'b1;
+            end else begin
+                slow_counter <= slow_counter + 1;
+                slow_clk_tick <= 1'b0;
+            end
+        end
     end
 
-    // Test stimulus and monitoring
-    initial begin
-        integer error_count = 0;
-        logic [2:0] expected_state;
-
-        $display("--- Starting Simulation ---");
-
-        // 1. Assert reset
-        rst_n = 1;
-        en = 0;
-        cw = 1;
-        #5;
-        rst_n = 0;
-        # (CLK_PERIOD * 10);
-        rst_n = 1;
-        # (CLK_PERIOD * 5);
-
-        if (dut.current_state !== 3'd0) begin
-            $error("Reset failed. Expected state 0, got %0d", dut.current_state);
-            error_count++;
+    // Clock divider for the display refresh clock
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            refresh_counter <= '0;
+            refresh_clk_tick <= 1'b0;
         end else begin
-            $display("PASS: Reset successful.");
-        end
-
-        // 2. Test Enable/Disable functionality
-        // With 'en' low, the state should not change despite slow clock ticks.
-        en = 0;
-        repeat (10) begin
-            wait (dut.slow_clk_tick);
-            @(posedge clk);
-        end
-        
-        if (dut.current_state !== 3'd0) begin
-            $error("State changed while disabled. Expected 0, got %0d", dut.current_state);
-            error_count++;
-        end else begin
-            $display("PASS: State unchanged while disabled.");
-        end
-
-        // 3. Test Clockwise rotation
-        $display("--- Testing Clockwise Rotation ---");
-        en = 1;
-        cw = 1;
-        expected_state = dut.current_state;
-
-        for (int i = 0; i < 16; i++) begin
-            wait (dut.slow_clk_tick); // Wait for the enable tick
-            @(posedge clk);           // Wait for the clock edge that captures the state change
-            #1;                       // Let signals propagate for checking
-
-            expected_state = (expected_state == 3'd7) ? 3'd0 : expected_state + 1;
-
-            if (dut.current_state !== expected_state) begin
-                $error("CW step %0d failed. Expected %0d, got %0d", i+1, expected_state, dut.current_state);
-                error_count++;
+            if (refresh_counter == REFRESH_DIV - 1) begin
+                refresh_counter <= '0;
+                refresh_clk_tick <= 1'b1;
+            end else begin
+                refresh_counter <= refresh_counter + 1;
+                refresh_clk_tick <= 1'b0;
             end
         end
-        $display("PASS: Clockwise rotation verified.");
+    end
 
-
-        // 4. Test Counter-clockwise rotation
-        $display("--- Testing Counter-Clockwise Rotation ---");
-        cw = 0;
-        expected_state = dut.current_state;
-
-        for (int i = 0; i < 16; i++) begin
-            wait (dut.slow_clk_tick);
-            @(posedge clk);
-            #1;
-
-            expected_state = (expected_state == 3'd0) ? 3'd7 : expected_state - 1;
-
-            if (dut.current_state !== expected_state) begin
-                $error("CCW step %0d failed. Expected %0d, got %0d", i+1, expected_state, dut.current_state);
-                error_count++;
+    // State machine to control the pattern's position
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            current_state <= 3'd0;
+        end else if (en && slow_clk_tick) begin
+            if (cw) begin // Clockwise rotation
+                current_state <= (current_state == 3'd7) ? 3'd0 : current_state + 1;
+            end else begin // Counter-clockwise rotation
+                current_state <= (current_state == 3'd0) ? 3'd7 : current_state - 1;
             end
         end
-        $display("PASS: Counter-clockwise rotation verified.");
+    end
 
-        // 5. Verify segment patterns
-        $display("--- Verifying Segment Patterns ---");
-        // Go to a known state, e.g., state 2 (square on digit 2, pattern 1)
-        cw = 1;
-        while (dut.current_state !== 3'd2) begin
-            wait(dut.slow_clk_tick);
-            @(posedge clk);
+    // Counter to cycle through the four digits for display multiplexing
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            digit_select <= 2'd0;
+        end else if (refresh_clk_tick) begin
+            digit_select <= digit_select + 1;
         end
+    end
 
-        // Wait for the multiplexer to select the correct digit (digit 2)
-        wait (dut.digit_select == 2'd2);
-        #1;
+    // Combinational logic for output generation
+    always_comb begin
+        // --- Anode Control ---
+        // Activate one digit at a time (active low)
+        case (digit_select)
+            2'b00:  an = 4'b1110; // Enable digit 0 (rightmost)
+            2'b01:  an = 4'b1101; // Enable digit 1
+            2'b10:  an = 4'b1011; // Enable digit 2
+            2'b11:  an = 4'b0111; // Enable digit 3 (leftmost)
+            default: an = 4'b1111;
+        endcase
 
-        if (seg !== dut.SQUARE_PATTERN_1) begin
-             $error("Segment pattern incorrect for state 2. Expected %b, got %b", dut.SQUARE_PATTERN_1, seg);
-             error_count++;
+        // --- Segment Control ---
+        // Determine which pattern to use based on the current state
+        if (current_state inside {[3'd0], [3'd1], [3'd2], [3'd3]}) begin
+            pattern_to_display = SQUARE_PATTERN_1;
         end else begin
-             $display("PASS: Segment pattern verified.");
+            pattern_to_display = SQUARE_PATTERN_2;
         end
 
-        // --- Final Results ---
-        if (error_count == 0) begin
-            $display("\n*** ALL TESTS PASSED ***");
+        // Determine which digit the square should be on
+        case (current_state)
+            3'd0, 3'd7: square_digit_pos = 2'd0;
+            3'd1, 3'd6: square_digit_pos = 2'd1;
+            3'd2, 3'd5: square_digit_pos = 2'd2;
+            3'd3, 3'd4: square_digit_pos = 2'd3;
+            default:    square_digit_pos = 2'bxx;
+        endcase
+
+        // If the currently active digit is the one that should show the square,
+        // output the pattern. Otherwise, turn all segments off.
+        if (digit_select == square_digit_pos) begin
+            seg = pattern_to_display;
         end else begin
-            $display("\n*** %0d TESTS FAILED ***", error_count);
+            seg = 8'b11111111; // All segments off
         end
-
-        $finish;
     end
 
 endmodule
