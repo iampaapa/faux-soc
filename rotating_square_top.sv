@@ -29,6 +29,10 @@ module rotating_square_top #(
     logic [26:0] slow_counter;
     logic [16:0] refresh_counter;
 
+    // Internal wires for combinational logic
+    logic [1:0] square_digit_pos;
+    logic [7:0] pattern_to_display;
+
     // ROM to store the two square patterns
     // Common anode displays require a '0' to light a segment.
     // Pattern encoding: {dp, g, f, e, d, c, b, a}
@@ -101,9 +105,6 @@ module rotating_square_top #(
         endcase
 
         // --- Segment Control ---
-        logic [1:0] square_digit_pos;
-        logic [7:0] pattern_to_display;
-
         // Determine which pattern to use based on the current state
         if (current_state inside {[3'd0], [3'd1], [3'd2], [3'd3]}) begin
             pattern_to_display = SQUARE_PATTERN_1;
