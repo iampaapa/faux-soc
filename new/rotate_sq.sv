@@ -44,16 +44,16 @@ module rotate_sq
 	//mod_12 tells which of the 6 seven-segments will turn-on and whether its the upper box or lower box 
 	always @* begin
        in0=8'hff; in1=8'hff; in2=8'hff; in3=8'hff; in4=8'hff; in5=8'hff; // Default off
-        case(mod_12)
-            // States 0-5: Upper box pattern (9C) travels in0 -> in5
+        case(mod_12) 
+            // States 0-5 for CW travel with Upper Box (9C)
             4'd0:  in0 = 8'h9C;
             4'd1:  in1 = 8'h9C;
             4'd2:  in2 = 8'h9C;
             4'd3:  in3 = 8'h9C;
             4'd4:  in4 = 8'h9C;
             4'd5:  in5 = 8'h9C;
-
-            // States 6-11: Lower box pattern (E2) travels in5 -> in0
+            
+            // States 6-11 for CW travel with Lower Box (E2)
             4'd6:  in5 = 8'hE2;
             4'd7:  in4 = 8'hE2;
             4'd8:  in3 = 8'hE2;
